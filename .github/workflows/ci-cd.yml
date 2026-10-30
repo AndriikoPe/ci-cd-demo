@@ -1,0 +1,61 @@
+# Опис конвеєра зберігається в репозиторії поруч із кодом.
+name: CI/CD
+
+on:
+  push:
+    branches: [main]      # кожен коміт у main: тести → збірка → розгортання
+  pull_request:
+    branches: [main]      # кожен pull request: лише тести
+
+permissions:
+  contents: read
+
+jobs:
+  # 1. Continuous Integration: кожну зміну перевіряють автоматичні тести на окремій машині
+  test:
+    name: "1. CI: тести"
+    runs-on: ubuntu-latest
+    steps:
+      - name: Взяти свіжий код
+        uses: actions/checkout@v7
+      - name: Встановити Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: 22
+      - name: Запустити тести (одна команда)
+        run: npm test
+
+  # 2. Збірка артефакту: один раз, прив'язано до конкретного коміту
+  build:
+    name: "2. Збірка"
+    needs: test                              # без зелених тестів збірки немає
+    if: github.event_name == 'push'          # pull request лише перевіряємо, не розгортаємо
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: Вписати у сторінку версію (хеш коміту)
+        run: |
+          sed -i "s|__VERSION__|${GITHUB_SHA::7}|; s|__COMMIT_URL__|$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/commit/$GITHUB_SHA|" site/index.html
+      - name: Зберегти артефакт
+        uses: actions/upload-pages-artifact@v5
+        with:
+          path: site
+
+  # 3. Розгортання зібраного артефакту на GitHub Pages.
+  #    Якщо в Settings → Environments → github-pages увімкнено "Required reviewers",
+  #    конвеєр чекає на підтвердження людини (Continuous Delivery).
+  #    Без цього правила розгортання повністю автоматичне (Continuous Deployment).
+  deploy:
+    name: "3. CD: розгортання"
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Розгорнути на GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v5
